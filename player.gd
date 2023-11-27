@@ -42,8 +42,6 @@ func _process(delta):
 	position += velocity * delta
 	position = position.clamp(Vector2.ZERO, screen_size)
 
-
-
 func _on_body_entered(_body):
 	hide() # Player disappears after being hit.
 	hit.emit()

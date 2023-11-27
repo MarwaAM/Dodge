@@ -1,47 +1,19 @@
 extends Node
 
 @export var mob_scene: PackedScene
-@export var max_spwans = 60 
-var music_on = true
+@export var state_machine: Node
+
 var spwns = 0
 var score 
-var url = "https://dodge-http-server.vercel.app/hs?id=" + OS.get_unique_id()
 
 func _ready():
-	$Music.play()
+	state_machine.play_sound($Music, $Music.playing)
 	toggle_start_button(true)
-	$HighScore.request_completed.connect(_on_request_completed)
-	await $HighScore.request(url)
-
-func _on_request_completed(_result, response_code, _headers, body):
-	toggle_start_button(false)	
-	if response_code != 201:
-		return
-	elif body:
-		var ServerHighScore = JSON.parse_string(body.get_string_from_utf8())
-		if ServerHighScore:
-			$HUD.updateHighScore(ServerHighScore, "server")
-
-
-func updateServeHighScore(highScore):
-	var body = { "highScore": highScore }
-	var json = JSON.stringify(body)
-	var headers = ["Content-Type: application/json"]
-	await $HighScore.request(url, headers, HTTPClient.METHOD_POST, json)
-	
-	
-func game_over():
-	$Music.stop()
-	$Death.play()
-	$HUD.updateHighScore(score)
-	$ScoreTimer.stop()
-	$MobTimer.stop()
-	spwns = 0
-	$HUD.game_over()
+	get_server_high_score()
 	
 func new_game():
-	if music_on:
-		$Music.play()
+	state_machine.play_sound($Music, $Music.playing)
+	set_level_values()
 	get_tree().call_group("mobs", "queue_free")
 
 	score = 0
@@ -50,18 +22,44 @@ func new_game():
 	$HUD.show_timed_message("Get Ready")
 	$StartTimer.start()
 
+func game_over():
+	state_machine.stop_sound($Music)
+	state_machine.play_sound($Death, $Death.playing)
+
+	$HUD.updateHighScore(score)
+	
+	reset_level()
+	$HUD.game_over()
+
+func set_level_values():
+	var level_spwans = get_node("Levels/Level"+str(state_machine.get_current_level())).max_spwans
+	state_machine.set_max_spwans(level_spwans)
+
+func next_level():
+	state_machine.set_next_level()
+	reset_level()
+	new_game()
+	
+func reset_level():
+	$ScoreTimer.stop()
+	$MobTimer.stop()
+	spwns = 0
+
+func toggleMusic(pressed):
+	state_machine.toggle_sound(!pressed, $Music)
+	
+	
+## Timers Functionality ##
 func _on_score_timer_timeout():
 	score += 1
 	$HUD.update_score(score)
-
 
 func _on_start_timer_timeout():
 	$MobTimer.start()
 	$ScoreTimer.start()
 
-
 func _on_mob_timer_timeout():
-	if spwns < max_spwans:
+	if spwns < state_machine.get_max_spwans():
 		spwns += 1
 		var mob = mob_scene.instantiate()
 	
@@ -81,15 +79,29 @@ func _on_mob_timer_timeout():
 
 		# Spawn the mob by adding it to the Main scene.
 		add_child(mob)
-
-func toggleMusic(pressed):
-	music_on = !pressed	
-	if pressed:
-		$Music.stop()
 	else:
-		$Music.play()
-		
-		
+		$NextLevel.show()
+	
+## High Score Functionality ##
+func get_server_high_score():
+	$HighScore.request_completed.connect(_on_request_completed)
+	await $HighScore.request(state_machine.url)
+
+func _on_request_completed(_result, response_code, _headers, body):
+	toggle_start_button(false)	
+	if response_code != 201:
+		return
+	elif body:
+		var ServerHighScore = JSON.parse_string(body.get_string_from_utf8())
+		if ServerHighScore:
+			$HUD.updateHighScore(ServerHighScore, "server")
+ 
+func updateServeHighScore(highScore):
+	var body = { "highScore": highScore }
+	var json = JSON.stringify(body)
+	var headers = ["Content-Type: application/json"]
+	await $HighScore.request(state_machine.url, headers, HTTPClient.METHOD_POST, json)
+	
 func toggle_start_button(loading: bool):
 	if loading:
 		$HUD/StartButton.disabled = true
@@ -98,6 +110,9 @@ func toggle_start_button(loading: bool):
 		$HUD/StartButton.disabled = false
 		$HUD/StartButton.text = "Start"
 		
+	
+	
+
 #func get_user_id():
 #	if not FileAccess.file_exists("user://savegame.save"):
 #		var save_game = FileAccess.open("user://savegame.save", FileAccess.WRITE)
